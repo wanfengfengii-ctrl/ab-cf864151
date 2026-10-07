@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>放射校准实验室 · 实时剂量看板</title>
+<style>
+  :root {
+    --bg: #0f1720; --panel: #17222e; --panel2: #1d2b3a; --line: #2b3c4f;
+    --text: #e8f0f7; --muted: #8fa3b5; --ok: #35c48d; --warn: #f0a53c; --bad: #ef5f6b;
+    --accent: #4aa8ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 14px 22px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 18px; margin: 0; }
+  h2 { font-size: 14px; color: var(--muted); margin: 0 0 12px; font-weight: 600; }
+  .meta { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; font-size: 13px; color: var(--muted); }
+  .meta b { color: var(--text); font-variant-numeric: tabular-nums; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; background: var(--warn); }
+  .dot.open { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot.reconnecting { background: var(--warn); }
+  main { display: grid; gap: 18px; padding: 18px 22px; max-width: 1100px; margin: 0 auto; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+  .card { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .card .ch { font-size: 12px; color: var(--muted); margin-bottom: 6px; word-break: break-all; }
+  .card .dose { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .card .dose span { font-size: 12px; color: var(--muted); font-weight: 400; }
+  form { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+  input { background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 13px; min-width: 170px; }
+  button { background: var(--accent); color: #06121f; border: 0; border-radius: 6px; padding: 9px 18px; font-size: 13px; font-weight: 700; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  ul#messages { list-style: none; margin: 12px 0 0; padding: 0; font-size: 12px; display: grid; gap: 4px; }
+  ul#messages li { padding: 6px 10px; border-radius: 6px; background: var(--panel2); border-left: 3px solid var(--muted); }
+  ul#messages li.ok { border-left-color: var(--ok); }
+  ul#messages li.err { border-left-color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; background: rgba(239,95,107,.15); color: var(--bad); border: 1px solid var(--bad); }
+  .muted { color: var(--muted); font-size: 12px; }
+  #flash { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--accent); color: var(--text); padding: 8px 16px; border-radius: 8px; font-size: 13px; display: none; z-index: 10; }
+</style>
+</head>
+<body>
+<div id="flash"></div>
+<header>
+  <h1>☢ 放射校准实验室 · 实时剂量看板</h1>
+  <div class="meta">
+    <span><span id="connDot" class="dot"></span><span id="connText">连接中…</span></span>
+    <span>最新修订号 <b id="revision">0</b></span>
+    <span>快照 <b id="snapCount">0</b> / 增量 <b id="deltaCount">0</b></span>
+    <span>更新于 <b id="updatedAt">—</b></span>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>分通道累计剂量</h2>
+    <div id="channels" class="grid"></div>
+    <p id="noChannels" class="muted">暂无读数 —— 等待采集器上报。</p>
+  </section>
+  <section>
+    <h2>上报读数（相同 readingId + 相同内容幂等去重，不重复累计）</h2>
+    <form id="form">
+      <label>readingId<input name="readingId" required maxlength="200" placeholder="collector-a-0001" autocomplete="off" /></label>
+      <label>通道<input name="channel" required maxlength="100" placeholder="CH-1" autocomplete="off" /></label>
+      <label>剂量（µGy，正整数）<input name="dose" required inputmode="numeric" placeholder="25" autocomplete="off" /></label>
+      <button id="submitBtn" type="submit">提交</button>
+    </form>
+    <ul id="messages"></ul>
+  </section>
+  <section>
+    <h2>冲突读数（与已登记内容不一致，未被计入）</h2>
+    <table id="conflictTable" hidden>
+      <thead><tr><th>时间</th><th>readingId</th><th>本次提交</th><th>已登记（修订号）</th><th>结果</th></tr></thead>
+      <tbody id="conflictRows"></tbody>
+    </table>
+    <p id="noConflicts" class="muted">暂无冲突读数。</p>
+  </section>
+</main>
+<script>
+'use strict';
+
+// ---- 客户端状态：无论经历补发还是快照重置，都收敛到服务端状态 ----
+const state = { revision: 0, channels: new Map() };
+let es = null;
+let snapshots = 0;
+let deltas = 0;
+
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+function setStatus(mode) {
+  $('connDot').className = 'dot ' + mode;
+  $('connText').textContent = {
+    connecting: '连接中…',
+    open: '已连接（实时）',
+    reconnecting: '连接中断，自动重连中…'
+  }[mode] || mode;
+}
+
+let flashTimer = null;
+function flash(msg) {
+  const el = $('flash');
+  el.textContent = msg;
+  el.style.display = 'block';
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+function render() {
+  $('revision').textContent = String(state.revision);
+  $('snapCount').textContent = String(snapshots);
+  $('deltaCount').textContent = String(deltas);
+  $('updatedAt').textContent = new Date().toLocaleTimeString('zh-CN');
+  const names = [...state.channels.keys()].sort();
+  $('noChannels').style.display = names.length ? 'none' : '';
+  $('channels').innerHTML = names.map((name) => `
+    <div class="card">
+      <div class="ch">${escapeHtml(name)}</div>
+      <div class="dose">${state.channels.get(name).toLocaleString('zh-CN')} <span>µGy</span></div>
+    </div>`).join('');
+}
+
+function connect() {
+  if (es) es.close();
+  setStatus('connecting');
+  // 全新的 EventSource 不携带 Last-Event-ID，服务端将先下发完整快照；
+  // 自动重连时浏览器会带上 Last-Event-ID，由服务端补发或快照重置。
+  es = new EventSource('/api/readings/stream');
+  es.onopen = () => setStatus('open');
+  es.onerror = () => setStatus('reconnecting');
+  es.addEventListener('snapshot', (e) => {
+    const s = JSON.parse(e.data);
+    state.revision = s.revision;
+    state.channels = new Map(Object.entries(s.channels));
+    snapshots += 1;
+    if (snapshots > 1) flash('游标过旧或强制刷新：已接收完整快照，看板与服务端状态对齐');
+    render();
+  });
+  es.addEventListener('reading', (e) => {
+    const d = JSON.parse(e.data);
+    if (d.revision <= state.revision) return; // 补发重复，幂等忽略
+    if (d.revision !== state.revision + 1) {
+      // 增量出现空洞：重建连接（不带 Last-Event-ID）获取新快照，保证收敛
+      connect();
+      return;
+    }
+    state.revision = d.revision;
+    state.channels.set(d.channel, d.total);
+    deltas += 1;
+    render();
+  });
+}
+
+function addMessage(kind, text) {
+  const li = document.createElement('li');
+  li.className = kind;
+  li.textContent = `[${new Date().toLocaleTimeString('zh-CN')}] ${text}`;
+  const list = $('messages');
+  list.prepend(li);
+  while (list.children.length > 8) list.lastChild.remove();
+}
+
+function addConflict(readingId, submitted, existing) {
+  $('noConflicts').style.display = 'none';
+  $('conflictTable').hidden = false;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td>${new Date().toLocaleTimeString('zh-CN')}</td>
+    <td>${escapeHtml(readingId)}</td>
+    <td>${escapeHtml(submitted.channel)} / ${escapeHtml(submitted.dose)} µGy</td>
+    <td>${escapeHtml(existing.channel)} / ${escapeHtml(existing.dose)} µGy（修订 ${escapeHtml(existing.revision)}）</td>
+    <td><span class="tag">未计入</span></td>`;
+  $('conflictRows').prepend(tr);
+}
+
+$('form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const form = ev.target;
+  const btn = $('submitBtn');
+  const reading = {
+    readingId: form.readingId.value.trim(),
+    channel: form.channel.value.trim(),
+    dose: Number(form.dose.value)
+  };
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/readings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(reading)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 201) {
+      addMessage('ok', `已计入 ${reading.readingId}：修订 ${data.revision}，通道 ${data.channel} 累计 ${data.total} µGy`);
+    } else if (res.status === 200) {
+      addMessage('ok', `幂等去重 ${reading.readingId}：与已登记内容一致，返回原修订 ${data.revision}，未重复累计`);
+    } else if (res.status === 409) {
+      addConflict(reading.readingId, reading, data.existing || {});
+      addMessage('err', `冲突 ${reading.readingId}：${data.message || '与已登记内容不同'}（未计入）`);
+    } else {
+      addMessage('err', `拒绝 ${reading.readingId}：${data.message || data.error || res.status}（未计入）`);
+    }
+  } catch (err) {
+    addMessage('err', `网络错误：${err.message}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+connect();
+</script>
+</body>
+</html>

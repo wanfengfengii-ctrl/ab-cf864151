@@ -1,0 +1,22 @@
+{
+  "name": "dose-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "放射校准实验室实时剂量看板：幂等上报、唯一递增修订、SSE 快照/增量/补发/重置",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:test": "tsc -p tsconfig.test.json",
+    "test": "npm run build:test && node --test \"dist-test/test/*.test.js\"",
+    "start": "node dist/server.js",
+    "smoke": "node verify/smoke.mjs",
+    "verify": "sh verify/run.sh"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "typescript": "^7.0.2"
+  }
+}
