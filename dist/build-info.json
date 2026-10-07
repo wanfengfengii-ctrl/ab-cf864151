@@ -1,0 +1,10 @@
+{
+  "name": "dose-dashboard",
+  "builtAt": "2026-10-07T14:43:31.836Z",
+  "node": "v22.23.2",
+  "files": {
+    "server.js": "6ef5df58ca96",
+    "state.js": "0d6255cdf27f",
+    "public/index.html": "2a1e74713cf3"
+  }
+}

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>放射校准实验室 · 实时剂量看板</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>实时剂量看板</h1>
+    <p class="subtitle">放射校准实验室 · 多采集器并发上报</p>
+  </div>
+  <div class="status-bar">
+    <span id="conn" class="badge conn-connecting">连接中…</span>
+    <span class="stat">最新修订号 <strong id="revision">–</strong></span>
+    <span class="stat">通道数 <strong id="channel-count">0</strong></span>
+  </div>
+</header>
+
+<main class="grid">
+  <section class="panel panel-wide">
+    <h2>分通道累计剂量</h2>
+    <table id="channels">
+      <thead>
+        <tr><th>通道</th><th class="num">累计剂量 (µGy)</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="empty" class="muted">暂无读数，等待采集器上报…</p>
+  </section>
+
+  <section class="panel">
+    <h2>上报读数</h2>
+    <form id="reading-form">
+      <label>readingId
+        <input name="readingId" required maxlength="128" placeholder="唯一读数 ID" autocomplete="off">
+      </label>
+      <label>通道
+        <input name="channel" required maxlength="64" placeholder="如 CH-1" autocomplete="off">
+      </label>
+      <label>剂量 (µGy，正整数)
+        <input name="dose" required type="number" min="1" step="1" placeholder="如 25">
+      </label>
+      <button type="submit">提交</button>
+    </form>
+    <div id="submit-result" class="result muted">提交结果将显示在这里</div>
+  </section>
+
+  <section class="panel">
+    <h2>冲突读数<span class="muted">（未计入）</span></h2>
+    <ul id="conflicts" class="list"></ul>
+    <p id="no-conflicts" class="muted">暂无冲突</p>
+  </section>
+
+  <section class="panel panel-wide">
+    <h2>最近事件</h2>
+    <ul id="events" class="list events"></ul>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

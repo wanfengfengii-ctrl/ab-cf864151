@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>放射校准实验室 · 实时剂量看板</title>
+<style>
+:root {
+  --bg: #0f1420;
+  --panel: #1a2233;
+  --border: #2a3550;
+  --text: #e6ebf5;
+  --muted: #8b96ad;
+  --accent: #4da3ff;
+  --ok: #3ecf8e;
+  --warn: #f5a623;
+  --bad: #ef5350;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 28px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 { margin: 0; font-size: 22px; }
+.subtitle { margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  font-size: 14px;
+}
+
+.stat strong { font-size: 18px; color: var(--accent); margin-left: 4px; }
+
+.badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.conn-connecting { background: #3a3f2a; color: var(--warn); }
+.conn-online { background: #14352a; color: var(--ok); }
+.conn-reconnecting { background: #3a2f1a; color: var(--warn); }
+.conn-closed { background: #3a1f1f; color: var(--bad); }
+.badge-conflict { background: #3a1f1f; color: var(--bad); margin-right: 8px; }
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 18px;
+  padding: 24px 28px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+
+.panel-wide { grid-column: 1 / -1; }
+
+.panel h2 { margin: 0 0 14px; font-size: 16px; }
+.panel h2 .muted { font-size: 13px; font-weight: 400; margin-left: 6px; }
+
+.muted { color: var(--muted); }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 500; font-size: 13px; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.num { color: var(--accent); font-weight: 600; }
+
+form { display: flex; flex-direction: column; gap: 12px; }
+label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+
+input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 9px 12px;
+  color: var(--text);
+  font-size: 14px;
+}
+input:focus { outline: none; border-color: var(--accent); }
+
+button {
+  background: var(--accent);
+  color: #06121f;
+  border: none;
+  border-radius: 6px;
+  padding: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.1); }
+
+.result { margin-top: 12px; font-size: 13px; min-height: 18px; }
+
+.list { list-style: none; margin: 0; padding: 0; }
+.list li {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.list li:last-child { border-bottom: none; }
+.events { max-height: 260px; overflow-y: auto; }
+.conflict strong { color: var(--bad); }
+
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <h1>实时剂量看板</h1>
+    <p class="subtitle">放射校准实验室 · 多采集器并发上报</p>
+  </div>
+  <div class="status-bar">
+    <span id="conn" class="badge conn-connecting">连接中…</span>
+    <span class="stat">最新修订号 <strong id="revision">–</strong></span>
+    <span class="stat">通道数 <strong id="channel-count">0</strong></span>
+  </div>
+</header>
+
+<main class="grid">
+  <section class="panel panel-wide">
+    <h2>分通道累计剂量</h2>
+    <table id="channels">
+      <thead>
+        <tr><th>通道</th><th class="num">累计剂量 (µGy)</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p id="empty" class="muted">暂无读数，等待采集器上报…</p>
+  </section>
+
+  <section class="panel">
+    <h2>上报读数</h2>
+    <form id="reading-form">
+      <label>readingId
+        <input name="readingId" required maxlength="128" placeholder="唯一读数 ID" autocomplete="off">
+      </label>
+      <label>通道
+        <input name="channel" required maxlength="64" placeholder="如 CH-1" autocomplete="off">
+      </label>
+      <label>剂量 (µGy，正整数)
+        <input name="dose" required type="number" min="1" step="1" placeholder="如 25">
+      </label>
+      <button type="submit">提交</button>
+    </form>
+    <div id="submit-result" class="result muted">提交结果将显示在这里</div>
+  </section>
+
+  <section class="panel">
+    <h2>冲突读数<span class="muted">（未计入）</span></h2>
+    <ul id="conflicts" class="list"></ul>
+    <p id="no-conflicts" class="muted">暂无冲突</p>
+  </section>
+
+  <section class="panel panel-wide">
+    <h2>最近事件</h2>
+    <ul id="events" class="list events"></ul>
+  </section>
+</main>
+
+<script>
+'use strict';
+
+/**
+ * 看板客户端：
+ * - 首次订阅收到完整快照；之后只应用严格连续的增量（revision + 1）。
+ * - 网络断线时 EventSource 自动携带 Last-Event-ID 重连，由服务端补发保留记录。
+ * - 检测到修订缺口（或游标过旧被重置）时主动重连，服务端会补发或下发新快照。
+ * 两条路径最终都收敛到服务端相同的分通道剂量与修订号。
+ */
+
+const state = { revision: null, channels: {} };
+let eventSource = null;
+
+const connEl = document.getElementById('conn');
+const revisionEl = document.getElementById('revision');
+const channelCountEl = document.getElementById('channel-count');
+const tbody = document.querySelector('#channels tbody');
+const emptyEl = document.getElementById('empty');
+const form = document.getElementById('reading-form');
+const resultEl = document.getElementById('submit-result');
+const conflictsEl = document.getElementById('conflicts');
+const noConflictsEl = document.getElementById('no-conflicts');
+const eventsEl = document.getElementById('events');
+
+const CONN_LABELS = {
+  connecting: ['连接中…', 'conn-connecting'],
+  online: ['在线', 'conn-online'],
+  reconnecting: ['重连中…', 'conn-reconnecting'],
+  closed: ['已断开', 'conn-closed'],
+};
+
+function setConn(status) {
+  const [text, cls] = CONN_LABELS[status];
+  connEl.textContent = text;
+  connEl.className = `badge ${cls}`;
+}
+
+function render() {
+  revisionEl.textContent = state.revision === null ? '–' : String(state.revision);
+  const channels = Object.keys(state.channels).sort();
+  channelCountEl.textContent = String(channels.length);
+  emptyEl.style.display = channels.length ? 'none' : '';
+  tbody.innerHTML = '';
+  for (const ch of channels) {
+    const tr = document.createElement('tr');
+    const tdCh = document.createElement('td');
+    tdCh.textContent = ch;
+    const tdDose = document.createElement('td');
+    tdDose.className = 'num';
+    tdDose.textContent = String(state.channels[ch]);
+    tr.append(tdCh, tdDose);
+    tbody.appendChild(tr);
+  }
+}
+
+function logEvent(text) {
+  const li = document.createElement('li');
+  li.textContent = `${new Date().toLocaleTimeString()} · ${text}`;
+  eventsEl.prepend(li);
+  while (eventsEl.children.length > 30) eventsEl.lastChild.remove();
+}
+
+function addConflict(readingId, detail) {
+  noConflictsEl.style.display = 'none';
+  const li = document.createElement('li');
+  li.className = 'conflict';
+  const badge = document.createElement('span');
+  badge.className = 'badge badge-conflict';
+  badge.textContent = '未计入';
+  const strong = document.createElement('strong');
+  strong.textContent = readingId;
+  li.append(badge, strong);
+  if (detail && detail.existing) {
+    const info = document.createElement('span');
+    info.className = 'muted';
+    info.textContent = ` 已登记：通道 ${detail.existing.channel} / 剂量 ${detail.existing.dose} µGy（修订 ${detail.revision}）`;
+    li.appendChild(info);
+  }
+  conflictsEl.prepend(li);
+}
+
+function connect() {
+  if (eventSource) eventSource.close();
+  setConn('connecting');
+  eventSource = new EventSource('/api/readings/stream');
+
+  eventSource.onopen = () => setConn('online');
+  eventSource.onerror = () => {
+    setConn(eventSource.readyState === EventSource.CLOSED ? 'closed' : 'reconnecting');
+  };
+
+  eventSource.addEventListener('snapshot', (e) => {
+    const snap = JSON.parse(e.data);
+    state.revision = snap.revision;
+    state.channels = { ...snap.channels };
+    render();
+    logEvent(`快照重置：修订 ${snap.revision}，${Object.keys(snap.channels).length} 个通道`);
+  });
+
+  eventSource.addEventListener('delta', (e) => {
+    const d = JSON.parse(e.data);
+    if (state.revision !== null && d.revision !== state.revision + 1) {
+      // 增量不连续：主动重连，由服务端补发保留记录或快照重置
+      logEvent(`检测到修订缺口（期望 ${state.revision + 1}，收到 ${d.revision}），重新订阅`);
+      connect();
+      return;
+    }
+    state.revision = d.revision;
+    state.channels[d.channel] = d.channelTotal;
+    render();
+    logEvent(`修订 ${d.revision}：${d.channel} +${d.dose} µGy → 累计 ${d.channelTotal} µGy`);
+  });
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const fd = new FormData(form);
+  const readingId = String(fd.get('readingId') || '').trim();
+  const channel = String(fd.get('channel') || '').trim();
+  const dose = Number(fd.get('dose'));
+  let res;
+  let body;
+  try {
+    res = await fetch('/api/readings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ readingId, channel, dose }),
+    });
+    body = await res.json();
+  } catch {
+    resultEl.textContent = '提交失败：网络错误';
+    return;
+  }
+  if (res.status === 201) {
+    resultEl.textContent = `已接受 · 修订号 ${body.revision}`;
+  } else if (res.status === 200) {
+    resultEl.textContent = `重复上报 · 未重复累计（原修订号 ${body.revision}）`;
+  } else if (res.status === 409) {
+    resultEl.textContent = '冲突 · 该读数未计入';
+    addConflict(readingId, body);
+  } else {
+    resultEl.textContent = `被拒绝（${res.status}）：${body && body.error ? body.error : '未知原因'}`;
+  }
+});
+
+connect();
+
+</script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "name": "dose-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "放射校准实验室实时剂量看板：幂等上报 + SSE 快照/严格连续增量 + 断线续接",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "start:dist": "node dist/server.js",
+    "build": "node scripts/build.js",
+    "test": "node --test",
+    "smoke": "node scripts/smoke.js",
+    "verify": "sh verify.sh"
+  }
+}
